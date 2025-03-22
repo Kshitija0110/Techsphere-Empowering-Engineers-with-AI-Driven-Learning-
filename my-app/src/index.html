@@ -1,0 +1,333 @@
+Vyto-RAG\index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat with your Subject PPTs,Assignments or Books</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .pdf-section {
+            margin-bottom: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .chat-section {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .chat-messages {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            height: 400px;
+            background-color: #f9f9f9;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .user-message {
+            background-color: #e3f2fd;
+            margin-left: 20px;
+            margin-right: 0;
+        }
+        .bot-message {
+            background-color: #f1f1f1;
+            margin-right: 20px;
+            margin-left: 0;
+        }
+        .chat-input {
+            display: flex;
+            padding: 10px;
+            background-color: #f1f1f1;
+        }
+        .chat-input input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+        .chat-input button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .loading {
+            text-align: center;
+            margin: 20px 0;
+            font-style: italic;
+            color: #666;
+        }
+        .source {
+            font-size: 12px;
+            color: #666;
+            font-style: italic;
+            margin-top: 5px;
+        }
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+        .settings {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .settings input {
+            width: 60px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PDF Chat Application</h1>
+        
+        <div class="settings">
+            <label for="temperature">Temperature: </label>
+            <input type="number" id="temperature" min="0" max="1" step="0.1" value="0">
+            <button onclick="setTemperature()">Set Temperature</button>
+        </div>
+        
+        <div class="pdf-section">
+            <h2>Upload a PDF Document</h2>
+            <input type="file" id="pdfFile" accept=".pdf" />
+            <button onclick="uploadPDF()">Upload & Process</button>
+            <div id="uploadStatus"></div>
+        </div>
+        
+        <div class="chat-section">
+            <h2>Chat with your PDF</h2>
+            <div class="chat-messages" id="chatMessages">
+                <div class="message bot-message">Hello! Upload a PDF and ask me questions about it.</div>
+            </div>
+            <div id="loading" class="loading" style="display: none;">Processing your request...</div>
+            <div class="chat-input">
+                <input type="text" id="userInput" placeholder="Ask a question about your PDF..." />
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:7860';
+        let currentCollection = null;
+        let chatHistory = [];
+
+        // Set up the Enter key to send messages
+        document.getElementById('userInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        function setTemperature() {
+            const temperature = document.getElementById('temperature').value;
+            
+            fetch(`${API_URL}/settemperature`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ temperature: parseFloat(temperature) })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error setting temperature: ' + data.error);
+                } else {
+                    alert('Temperature set to ' + temperature);
+                }
+            })
+            .catch(error => {
+                console.error('Error setting temperature:', error);
+                alert('Error setting temperature. See console for details.');
+            });
+        }
+
+        function uploadPDF() {
+            const fileInput = document.getElementById('pdfFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a PDF file first.');
+                return;
+            }
+
+            const uploadStatus = document.getElementById('uploadStatus');
+            uploadStatus.textContent = 'Uploading and processing your PDF...';
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            fetch(`${API_URL}/upload`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    uploadStatus.textContent = 'Error: ' + data.error;
+                } else {
+                    uploadStatus.textContent = 'PDF processed successfully!';
+                    currentCollection = data.collection_name;
+                    
+                    // Set the collection name in the backend
+                    return fetch(`${API_URL}/db_collection`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ collection_name: currentCollection })
+                    });
+                }
+            })
+            .then(response => response ? response.json() : null)
+            .then(data => {
+                if (data && data.message) {
+                    console.log(data.message);
+                    // Add a message to chat
+                    addBotMessage(`I've processed your document "${currentCollection}". You can now ask questions about it!`);
+                }
+            })
+            .catch(error => {
+                console.error('Error uploading PDF:', error);
+                uploadStatus.textContent = 'Error uploading PDF. See console for details.';
+            });
+        }
+
+        function sendMessage() {
+            const userInput = document.getElementById('userInput');
+            const message = userInput.value.trim();
+            
+            if (message === '') return;
+            
+            if (!currentCollection) {
+                addBotMessage('Please upload a PDF document first.');
+                userInput.value = '';
+                return;
+            }
+            
+            // Add user message to chat
+            addUserMessage(message);
+            userInput.value = '';
+            
+            // Show loading indicator
+            document.getElementById('loading').style.display = 'block';
+            
+            fetch(`${API_URL}/query`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    question: message,
+                    history: chatHistory
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading indicator
+                document.getElementById('loading').style.display = 'none';
+                
+                if (data.error) {
+                    addBotMessage('Error: ' + data.error);
+                } else {
+                    const sourceInfo = data.source ? `<div class="source">Source: ${data.source}</div>` : '';
+                    addBotMessage(data.answer.replace(/(Source:.*)/, '') + sourceInfo);
+                    
+                    // Update chat history
+                    chatHistory.push({
+                        human: message,
+                        assistant: data.answer
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error sending message:', error);
+                document.getElementById('loading').style.display = 'none';
+                addBotMessage('Error processing your request. Please try again.');
+            });
+        }
+
+        function addUserMessage(message) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message user-message';
+            messageDiv.textContent = message;
+            chatMessages.appendChild(messageDiv);
+            scrollToBottom();
+        }
+
+        function addBotMessage(message) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message bot-message';
+            
+            if (message.includes('<div class="source">')) {
+                const parts = message.split('<div class="source">');
+                messageDiv.textContent = parts[0];
+                
+                const sourceDiv = document.createElement('div');
+                sourceDiv.className = 'source';
+                sourceDiv.textContent = parts[1].replace('</div>', '');
+                messageDiv.appendChild(sourceDiv);
+            } else {
+                messageDiv.textContent = message;
+            }
+            
+            chatMessages.appendChild(messageDiv);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Test connection to the backend
+        fetch(`${API_URL}/send`)
+            .then(response => response.json())
+            .then(data => {
+                console.log('Connected to backend:', data);
+            })
+            .catch(error => {
+                console.error('Error connecting to backend:', error);
+                addBotMessage('Error connecting to backend server. Please make sure the Flask application is running.');
+            });
+    </script>
+</body>
+</html>
